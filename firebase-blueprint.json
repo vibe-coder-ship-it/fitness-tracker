@@ -1,0 +1,57 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and settings",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "unitPreference": { "type": "string", "enum": ["lbs", "kg"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Workout": {
+      "title": "Workout",
+      "description": "A logged workout session",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "duration": { "type": "number" },
+        "unit": { "type": "string", "enum": ["lbs", "kg"] },
+        "notes": { "type": "string" },
+        "exercises": { "type": "array" }
+      },
+      "required": ["uid", "date", "exercises", "unit"]
+    },
+    "NutritionLog": {
+      "title": "NutritionLog",
+      "description": "Daily nutrition log",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "meals": { "type": "array" }
+      },
+      "required": ["uid", "date", "meals"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile data"
+    },
+    "/workouts/{workoutId}": {
+      "schema": "Workout",
+      "description": "User workout sessions"
+    },
+    "/nutrition/{logId}": {
+      "schema": "NutritionLog",
+      "description": "User nutrition logs"
+    }
+  }
+}

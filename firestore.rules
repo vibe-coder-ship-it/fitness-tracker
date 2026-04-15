@@ -1,0 +1,112 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: users
+// Document ID: userId (auth.uid)
+// Fields:
+//   - uid: string (required)
+//   - email: string (required)
+//   - displayName: string
+//   - photoURL: string
+//   - unitPreference: string (lbs/kg)
+//   - createdAt: timestamp
+//
+// Collection: workouts
+// Document ID: auto-generated
+// Fields:
+//   - uid: string (required) - owner of the workout
+//   - date: timestamp (required)
+//   - duration: number (required)
+//   - unit: string (required, lbs/kg)
+//   - notes: string
+//   - exercises: list (required) - array of exercise objects
+//
+// Collection: nutrition
+// Document ID: auto-generated (or YYYY-MM-DD_uid)
+// Fields:
+//   - uid: string (required)
+//   - date: string (required, YYYY-MM-DD)
+//   - meals: list (required)
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.uid;
+    }
+
+    function isRequestOwner() {
+      return isAuthenticated() && request.auth.uid == request.resource.data.uid;
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email']) &&
+             data.uid == request.auth.uid &&
+             isValidEmail(data.email) &&
+             (!('unitPreference' in data) || data.unitPreference in ['lbs', 'kg']);
+    }
+
+    function isValidWorkout(data) {
+      return data.keys().hasAll(['uid', 'date', 'duration', 'unit', 'exercises']) &&
+             data.uid == request.auth.uid &&
+             data.duration is number &&
+             data.unit in ['lbs', 'kg'] &&
+             data.exercises is list;
+    }
+
+    function isValidNutrition(data) {
+      return data.keys().hasAll(['uid', 'date', 'meals']) &&
+             data.uid == request.auth.uid &&
+             data.date is string &&
+             data.meals is list;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data);
+    }
+
+    match /workouts/{workoutId} {
+      allow read: if isAuthenticated() && resource.data.uid == request.auth.uid;
+      allow create: if isAuthenticated() && isValidWorkout(request.resource.data);
+      allow update: if isAuthenticated() && isDocOwner() && isValidWorkout(request.resource.data);
+      allow delete: if isAuthenticated() && isDocOwner();
+    }
+
+    match /nutrition/{logId} {
+      allow read: if isAuthenticated() && resource.data.uid == request.auth.uid;
+      allow create: if isAuthenticated() && isValidNutrition(request.resource.data);
+      allow update: if isAuthenticated() && isDocOwner() && isValidNutrition(request.resource.data);
+      allow delete: if isAuthenticated() && isDocOwner();
+    }
+  }
+}

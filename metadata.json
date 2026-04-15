@@ -1,0 +1,6 @@
+{
+  "name": "Kinetic",
+  "description": "Kinetic Architecture is a high-performance fitness and nutrition platform. It features real-time workout logging, macro tracking, an AI-powered recovery map, and precision tools like a plate calculator, all synced via Firebase.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
