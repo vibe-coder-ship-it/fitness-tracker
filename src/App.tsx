@@ -437,7 +437,7 @@ export default function App() {
           <div className="max-w-6xl mx-auto">
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
               {activeTab === 'dashboard' && <Dashboard workouts={workouts} unit={unit} />}
-              {activeTab === 'logger' && <WorkoutLogger onSave={addWorkout} defaultUnit={unit} />}
+              {activeTab === 'logger' && <WorkoutLogger onSave={addWorkout} defaultUnit={unit} user={user} />}
               {activeTab === 'history' && <WorkoutHistory workouts={workouts} onDelete={deleteWorkout} unit={unit} />}
               {activeTab === 'nutrition' && <NutritionTracker user={user} />}
               {activeTab === 'plans' && <WorkoutPlans />}

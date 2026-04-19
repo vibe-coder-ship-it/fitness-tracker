@@ -24,7 +24,40 @@ import {
   Zap
 } from 'lucide-react';
 import { Workout, ExerciseCategory, ResistanceSet, CalisthenicsSet, IsometricSet, CardioSet, WeightUnit, NutritionLog } from '../types';
-import { cn, formatDate } from '../lib/utils';
+import { cn, formatDate, formatHMS } from '../lib/utils';
+
+interface TooltipProps {
+  active?: boolean;
+  payload?: any[];
+  label?: string;
+  category?: ExerciseCategory;
+  unit: WeightUnit;
+}
+
+const CustomTooltip = ({ active, payload, label, category, unit }: TooltipProps) => {
+  if (active && payload && payload.length) {
+    return (
+      <div className="bg-surface border border-border p-3 rounded-md shadow-2xl">
+        <p className="text-[10px] font-bold text-text-secondary uppercase tracking-widest mb-2">{label}</p>
+        {payload.map((entry, index) => (
+          <div key={index} className="flex flex-col mb-1 last:mb-0">
+            <span className="text-[9px] font-bold text-text-secondary uppercase">{entry.name}</span>
+            <span className="text-sm font-black text-text-primary">
+              {category === 'isometrics' ? (
+                formatHMS(entry.value)
+              ) : (
+                `${entry.value} ${entry.name.includes('Volume') ? unit : unit}`
+              )}
+              {category === 'calisthenics' && entry.name.includes('Best') && ' reps'}
+              {category === 'cardio' && ' min'}
+            </span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return null;
+};
 
 interface DashboardProps {
   workouts: Workout[];
@@ -253,7 +286,7 @@ export default function Dashboard({ workouts, unit }: DashboardProps) {
                       tick={{ fontSize: 10, fontWeight: 600, fill: '#94A3B8' }}
                     />
                     <Tooltip 
-                      contentStyle={{ backgroundColor: '#1E293B', borderRadius: '8px', border: '1px solid #334155', color: '#F8FAFC' }}
+                      content={<CustomTooltip category={activeExerciseInfo?.category} unit={unit} />}
                     />
                     <Area 
                       type="monotone" 
@@ -335,7 +368,7 @@ export default function Dashboard({ workouts, unit }: DashboardProps) {
                       tick={{ fontSize: 10, fontWeight: 600, fill: '#94A3B8' }}
                     />
                     <Tooltip 
-                      contentStyle={{ backgroundColor: '#1E293B', borderRadius: '8px', border: '1px solid #334155', color: '#F8FAFC' }}
+                      content={<CustomTooltip unit={unit} />}
                     />
                     <Line 
                       yAxisId="left"

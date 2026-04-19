@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
-import { Calendar, Clock, Trash2, Dumbbell, Zap, Timer, Heart } from 'lucide-react';
-import { Workout, WeightUnit } from '../types';
-import { formatDate } from '../lib/utils';
+import { Calendar, Clock, Trash2, Dumbbell, Zap, Timer, Heart, ChevronDown, ChevronUp } from 'lucide-react';
+import { Workout, WeightUnit, ResistanceSet, CalisthenicsSet, IsometricSet, CardioSet } from '../types';
+import { formatDate, formatHMS } from '../lib/utils';
 
 interface WorkoutHistoryProps {
   workouts: Workout[];
@@ -10,6 +10,8 @@ interface WorkoutHistoryProps {
 }
 
 export default function WorkoutHistory({ workouts, onDelete, unit }: WorkoutHistoryProps) {
+  const [expandedWorkout, setExpandedWorkout] = React.useState<string | null>(null);
+
   const groupedWorkouts = useMemo(() => {
     const groups: Record<string, Workout[]> = {};
     workouts.forEach(w => {
@@ -77,18 +79,42 @@ export default function WorkoutHistory({ workouts, onDelete, unit }: WorkoutHist
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {workout.exercises.map((exercise) => (
-                      <div key={exercise.id} className="flex items-center gap-3 p-3 bg-white/5 rounded-md border border-border">
-                        <div className="text-text-secondary">
-                          {exercise.category === 'resistance' && <Dumbbell size={14} />}
-                          {exercise.category === 'calisthenics' && <Zap size={14} />}
-                          {exercise.category === 'isometrics' && <Timer size={14} />}
-                          {exercise.category === 'cardio' && <Heart size={14} />}
-                        </div>
-                        <div className="flex-grow">
-                          <div className="text-xs font-bold text-text-primary">{exercise.name}</div>
-                          <div className="text-[9px] text-text-secondary uppercase font-bold tracking-wider">
-                            {exercise.sets.length} sets • {exercise.category}
+                      <div key={exercise.id} className="p-3 bg-white/5 rounded-md border border-border space-y-2">
+                        <div className="flex items-center gap-3">
+                          <div className="text-text-secondary">
+                            {exercise.category === 'resistance' && <Dumbbell size={14} />}
+                            {exercise.category === 'calisthenics' && <Zap size={14} />}
+                            {exercise.category === 'isometrics' && <Timer size={14} />}
+                            {exercise.category === 'cardio' && <Heart size={14} />}
                           </div>
+                          <div className="flex-grow">
+                            <div className="text-xs font-bold text-text-primary">{exercise.name}</div>
+                            <div className="text-[9px] text-text-secondary uppercase font-bold tracking-wider">
+                              {exercise.sets.length} sets • {exercise.category}
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 pt-1 border-t border-white/5">
+                          {exercise.sets.map((set, i) => (
+                            <div key={set.id} className="text-[10px] text-text-secondary flex justify-between">
+                              <span className="opacity-50 font-mono">{i + 1}.</span>
+                              <span className="font-bold">
+                                {exercise.category === 'resistance' && (
+                                  `${(set as ResistanceSet).weight}${workout.unit} x ${(set as ResistanceSet).reps}`
+                                )}
+                                {exercise.category === 'calisthenics' && (
+                                  `${(set as CalisthenicsSet).reps} reps${(set as CalisthenicsSet).addedWeight ? ` (+${(set as CalisthenicsSet).addedWeight}${workout.unit})` : ''}`
+                                )}
+                                {exercise.category === 'isometrics' && (
+                                  `${formatHMS((set as IsometricSet).timeUnderTension)}${(set as IsometricSet).addedWeight ? ` (+${(set as IsometricSet).addedWeight}${workout.unit})` : ''}`
+                                )}
+                                {exercise.category === 'cardio' && (
+                                  `${(set as CardioSet).totalTime}m (${(set as CardioSet).intensityTime}m intensity)`
+                                )}
+                              </span>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     ))}

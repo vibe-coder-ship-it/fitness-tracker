@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, Save, X, Dumbbell, Timer, Heart, Zap, ChevronDown, Ghost, Play, RotateCcw } from 'lucide-react';
+import { Plus, Trash2, Save, X, Dumbbell, Timer, Heart, Zap, ChevronDown, Ghost, Play, RotateCcw, Loader2, Clock } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { 
   Workout, 
@@ -13,21 +13,97 @@ import {
   WeightUnit
 } from '../types';
 import { COMMON_EXERCISES } from '../constants';
+import { collection, doc, setDoc, getDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../firebase';
+import { User } from 'firebase/auth';
 
 interface WorkoutLoggerProps {
   onSave: (workout: Workout) => void;
   defaultUnit: WeightUnit;
+  user: User | null;
 }
 
-export default function WorkoutLogger({ onSave, defaultUnit }: WorkoutLoggerProps) {
+export default function WorkoutLogger({ onSave, defaultUnit, user }: WorkoutLoggerProps) {
   const [exercises, setExercises] = useState<WorkoutExercise[]>([]);
-  const [duration, setDuration] = useState<number>(60);
   const [notes, setNotes] = useState('');
   const [unit, setUnit] = useState<WeightUnit>(defaultUnit);
   const [isGhostMode, setIsGhostMode] = useState(false);
   const [restTime, setRestTime] = useState(0);
   const [isResting, setIsResting] = useState(false);
-  const [lastIntensity, setLastIntensity] = useState(0);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [checkedSets, setCheckedSets] = useState<Record<string, boolean>>({});
+  const startTime = useRef<number>(Date.now());
+
+  // Load Draft
+  useEffect(() => {
+    async function loadDraft() {
+      if (!user) {
+        const saved = localStorage.getItem('kinetic-workout-draft');
+        if (saved) {
+          try {
+            const draft = JSON.parse(saved);
+            setExercises(draft.exercises);
+            setNotes(draft.notes);
+            setUnit(draft.unit);
+            if (draft.startTime) startTime.current = draft.startTime;
+          } catch (e) {}
+        }
+        return;
+      }
+
+      try {
+        const draftRef = doc(db, 'drafts', user.uid);
+        const draftSnap = await getDoc(draftRef);
+        if (draftSnap.exists()) {
+          const draft = draftSnap.data();
+          setExercises(draft.exercises || []);
+          setNotes(draft.notes || '');
+          setUnit(draft.unit || defaultUnit);
+          setCheckedSets(draft.checkedSets || {});
+          if (draft.startTime) startTime.current = draft.startTime;
+          setLastSaved(new Date());
+        }
+      } catch (error) {
+        console.error("Error loading draft:", error);
+      }
+    }
+    loadDraft();
+  }, [user, defaultUnit]);
+
+  // Auto-Save Draft
+  useEffect(() => {
+    const draftData = {
+      exercises,
+      notes,
+      unit,
+      checkedSets,
+      startTime: startTime.current,
+      updatedAt: serverTimestamp()
+    };
+
+    // Fast local save
+    localStorage.setItem('kinetic-workout-draft', JSON.stringify({
+      ...draftData,
+      updatedAt: new Date().toISOString()
+    }));
+
+    if (!user) return;
+
+    const timeoutId = setTimeout(async () => {
+      setIsSyncing(true);
+      try {
+        await setDoc(doc(db, 'drafts', user.uid), draftData);
+        setLastSaved(new Date());
+      } catch (error) {
+        console.error("Error saving draft:", error);
+      } finally {
+        setIsSyncing(false);
+      }
+    }, 2000);
+
+    return () => clearTimeout(timeoutId);
+  }, [exercises, notes, unit, checkedSets, user]);
 
   // Timer logic
   useEffect(() => {
@@ -115,39 +191,40 @@ export default function WorkoutLogger({ onSave, defaultUnit }: WorkoutLoggerProp
     }));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (exercises.length === 0) return;
     
+    // Calculate duration automatically
+    const endTime = Date.now();
+    const durationMinutes = Math.round((endTime - startTime.current) / 60000);
+
     const workout: Workout = {
       id: Math.random().toString(36).substr(2, 9),
       date: new Date().toISOString(),
-      duration,
+      duration: durationMinutes,
       exercises,
       unit,
       notes
     };
+
+    // Submit actual session
     onSave(workout);
+
+    // Clear draft
+    localStorage.removeItem('kinetic-workout-draft');
+    if (user) {
+      try {
+        await deleteDoc(doc(db, 'drafts', user.uid));
+      } catch (e) {}
+    }
+  };
+
+  const toggleSetCheck = (setId: string) => {
+    setCheckedSets(prev => ({ ...prev, [setId]: !prev[setId] }));
   };
 
   return (
     <div className={cn("space-y-6 max-w-4xl mx-auto transition-all duration-500", isGhostMode && "opacity-40 grayscale blur-[1px] pointer-events-none select-none")}>
-      {/* Ghost Mode Toggle (Always visible) */}
-      <div className="fixed top-24 right-8 z-[100] pointer-events-auto">
-        <button 
-          onClick={() => setIsGhostMode(!isGhostMode)}
-          className={cn(
-            "p-4 rounded-full shadow-2xl transition-all group",
-            isGhostMode ? "bg-accent text-bg" : "bg-surface text-text-secondary hover:text-accent border border-border"
-          )}
-          title="Toggle Ghost Mode"
-        >
-          <Ghost size={24} className={cn(isGhostMode && "animate-pulse")} />
-          <span className="absolute right-full mr-4 top-1/2 -translate-y-1/2 bg-surface border border-border px-3 py-1 rounded text-[10px] font-bold uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-            {isGhostMode ? "Disable Ghost Mode" : "Enable Ghost Mode"}
-          </span>
-        </button>
-      </div>
-
       {/* Rest Timer Overlay */}
       {isResting && (
         <div className="fixed inset-0 bg-bg/80 backdrop-blur-sm z-[110] flex items-center justify-center animate-in fade-in duration-300 pointer-events-auto">
@@ -179,15 +256,6 @@ export default function WorkoutLogger({ onSave, defaultUnit }: WorkoutLoggerProp
         <div className="flex flex-wrap gap-4 items-center justify-between">
           <div className="flex items-center gap-4 flex-grow">
             <div className="flex flex-col">
-              <label className="kinetic-label mb-1">Duration</label>
-              <input 
-                type="number" 
-                value={duration} 
-                onChange={(e) => setDuration(parseInt(e.target.value) || 0)}
-                className="bg-bg border border-border rounded-md px-3 py-2 w-24 focus:ring-1 focus:ring-accent outline-none transition-all text-sm font-bold"
-              />
-            </div>
-            <div className="flex flex-col">
               <label className="kinetic-label mb-1">Unit</label>
               <select 
                 value={unit} 
@@ -208,15 +276,39 @@ export default function WorkoutLogger({ onSave, defaultUnit }: WorkoutLoggerProp
                 className="bg-bg border border-border rounded-md px-3 py-2 focus:ring-1 focus:ring-accent outline-none transition-all text-sm"
               />
             </div>
+            {lastSaved && (
+              <div className="flex flex-col items-center justify-center px-4 border-l border-border">
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  {isSyncing ? (
+                    <Loader2 size={12} className="text-accent animate-spin" />
+                  ) : (
+                    <CloudCheck size={12} className="text-accent" />
+                  )}
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-accent">Auto-Saved</span>
+                </div>
+                <span className="text-[8px] text-text-secondary font-mono">
+                  {lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </span>
+              </div>
+            )}
+
+            {/* Ghost Mode Toggle (Integrated into header) */}
+            <div className="flex items-center pl-4 border-l border-border pointer-events-auto">
+              <button 
+                onClick={() => setIsGhostMode(!isGhostMode)}
+                className={cn(
+                  "p-2 rounded-lg transition-all flex items-center gap-2",
+                  isGhostMode ? "bg-accent text-bg" : "bg-bg text-text-secondary hover:text-accent border border-border"
+                )}
+                title="Toggle Ghost Mode"
+              >
+                <Ghost size={16} className={cn(isGhostMode && "animate-pulse")} />
+                <span className="text-[10px] font-bold uppercase tracking-widest leading-none hidden sm:block">
+                  {isGhostMode ? "Ghost Active" : "Ghost"}
+                </span>
+              </button>
+            </div>
           </div>
-          <button 
-            onClick={handleSave}
-            disabled={exercises.length === 0}
-            className="bg-accent text-bg px-6 py-3 rounded-md font-bold flex items-center gap-2 hover:bg-sky-300 disabled:opacity-30 disabled:cursor-not-allowed transition-all uppercase text-xs tracking-widest"
-          >
-            <Save size={16} />
-            Save Session
-          </button>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -248,8 +340,14 @@ export default function WorkoutLogger({ onSave, defaultUnit }: WorkoutLoggerProp
                 
                 <div className="relative flex-grow max-w-md">
                   <select
-                    value={exercise.name}
-                    onChange={(e) => updateExercise(exercise.id, { name: e.target.value })}
+                    value={exercise.isCustom ? 'custom' : exercise.name}
+                    onChange={(e) => {
+                      if (e.target.value === 'custom') {
+                        updateExercise(exercise.id, { isCustom: true, name: '' });
+                      } else {
+                        updateExercise(exercise.id, { isCustom: false, name: e.target.value });
+                      }
+                    }}
                     className="w-full bg-surface text-sm font-bold outline-none border-b border-border focus:border-accent transition-all appearance-none cursor-pointer pr-8 py-1"
                   >
                     <option value="" disabled className="bg-surface">Select Exercise</option>
@@ -261,12 +359,14 @@ export default function WorkoutLogger({ onSave, defaultUnit }: WorkoutLoggerProp
                   <ChevronDown size={14} className="absolute right-0 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none" />
                 </div>
 
-                {exercise.name === 'custom' && (
+                {exercise.isCustom && (
                   <input 
                     type="text" 
                     placeholder="Enter exercise name"
+                    value={exercise.name}
                     onChange={(e) => updateExercise(exercise.id, { name: e.target.value })}
                     className="bg-transparent text-sm font-bold outline-none border-b border-accent transition-all w-full max-w-xs"
+                    autoFocus
                   />
                 )}
               </div>
@@ -288,13 +388,25 @@ export default function WorkoutLogger({ onSave, defaultUnit }: WorkoutLoggerProp
                       <>
                         <SetInput label="Weight" value={(set as ResistanceSet).weight} onChange={(v) => updateSet(exercise.id, set.id, { weight: v })} suffix={unit} />
                         <SetInput label="Reps" value={(set as ResistanceSet).reps} onChange={(v) => updateSet(exercise.id, set.id, { reps: v })} />
-                        <button 
-                          onClick={() => startRest((set as ResistanceSet).weight * (set as ResistanceSet).reps / 10)}
-                          className="p-2 text-text-secondary hover:text-accent transition-colors"
-                          title="Complete Set & Start Rest"
-                        >
-                          <Check size={14} />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button 
+                            onClick={() => toggleSetCheck(set.id)}
+                            className={cn(
+                              "p-2 transition-colors rounded-full",
+                              checkedSets[set.id] ? "text-accent bg-accent/10" : "text-text-secondary hover:text-accent hover:bg-white/5"
+                            )}
+                            title="Complete Set"
+                          >
+                            <Check size={14} />
+                          </button>
+                          <button 
+                            onClick={() => startRest((set as ResistanceSet).weight * (set as ResistanceSet).reps / 10)}
+                            className="p-2 text-text-secondary hover:text-accent-alt transition-colors rounded-full hover:bg-white/5"
+                            title="Start Adaptive Rest"
+                          >
+                            <Clock size={14} />
+                          </button>
+                        </div>
                       </>
                     )}
 
@@ -302,25 +414,81 @@ export default function WorkoutLogger({ onSave, defaultUnit }: WorkoutLoggerProp
                       <>
                         <SetInput label="Reps" value={(set as CalisthenicsSet).reps} onChange={(v) => updateSet(exercise.id, set.id, { reps: v })} />
                         <SetInput label="Added" value={(set as CalisthenicsSet).addedWeight || 0} onChange={(v) => updateSet(exercise.id, set.id, { addedWeight: v })} suffix={unit} />
-                        <button 
-                          onClick={() => startRest((set as CalisthenicsSet).reps)}
-                          className="p-2 text-text-secondary hover:text-accent transition-colors"
-                        >
-                          <Check size={14} />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button 
+                            onClick={() => toggleSetCheck(set.id)}
+                            className={cn(
+                              "p-2 transition-colors rounded-full",
+                              checkedSets[set.id] ? "text-accent bg-accent/10" : "text-text-secondary hover:text-accent hover:bg-white/5"
+                            )}
+                          >
+                            <Check size={14} />
+                          </button>
+                          <button 
+                            onClick={() => startRest((set as CalisthenicsSet).reps)}
+                            className="p-2 text-text-secondary hover:text-accent-alt transition-colors rounded-full hover:bg-white/5"
+                            title="Start Adaptive Rest"
+                          >
+                            <Clock size={14} />
+                          </button>
+                        </div>
                       </>
                     )}
 
                     {exercise.category === 'isometrics' && (
                       <>
-                        <SetInput label="Time" value={(set as IsometricSet).timeUnderTension} onChange={(v) => updateSet(exercise.id, set.id, { timeUnderTension: v })} suffix="s" />
+                        <div className="flex items-center gap-1 group/hms">
+                          <label className="text-[9px] font-bold uppercase text-text-secondary tracking-tighter mb-0.5 block">Time</label>
+                          <div className="flex items-center gap-1">
+                            <HMSInput 
+                              value={Math.floor((set as IsometricSet).timeUnderTension / 3600)} 
+                              onChange={(v) => {
+                                const { minutes, seconds } = secondsToHMS((set as IsometricSet).timeUnderTension);
+                                updateSet(exercise.id, set.id, { timeUnderTension: hmsToSeconds(v, minutes, seconds) });
+                              }} 
+                              label="H"
+                            />
+                            <span className="text-text-secondary font-bold text-[10px] self-end mb-2">:</span>
+                            <HMSInput 
+                              value={Math.floor(((set as IsometricSet).timeUnderTension % 3600) / 60)} 
+                              onChange={(v) => {
+                                const { hours, seconds } = secondsToHMS((set as IsometricSet).timeUnderTension);
+                                updateSet(exercise.id, set.id, { timeUnderTension: hmsToSeconds(hours, v, seconds) });
+                              }} 
+                              label="M"
+                              max={59}
+                            />
+                            <span className="text-text-secondary font-bold text-[10px] self-end mb-2">:</span>
+                            <HMSInput 
+                              value={(set as IsometricSet).timeUnderTension % 60} 
+                              onChange={(v) => {
+                                const { hours, minutes } = secondsToHMS((set as IsometricSet).timeUnderTension);
+                                updateSet(exercise.id, set.id, { timeUnderTension: hmsToSeconds(hours, minutes, v) });
+                              }} 
+                              label="S"
+                              max={59}
+                            />
+                          </div>
+                        </div>
                         <SetInput label="Added" value={(set as IsometricSet).addedWeight || 0} onChange={(v) => updateSet(exercise.id, set.id, { addedWeight: v })} suffix={unit} />
-                        <button 
-                          onClick={() => startRest((set as IsometricSet).timeUnderTension / 2)}
-                          className="p-2 text-text-secondary hover:text-accent transition-colors"
-                        >
-                          <Check size={14} />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button 
+                            onClick={() => toggleSetCheck(set.id)}
+                            className={cn(
+                              "p-2 transition-colors rounded-full",
+                              checkedSets[set.id] ? "text-accent bg-accent/10" : "text-text-secondary hover:text-accent hover:bg-white/5"
+                            )}
+                          >
+                            <Check size={14} />
+                          </button>
+                          <button 
+                            onClick={() => startRest((set as IsometricSet).timeUnderTension / 2)}
+                            className="p-2 text-text-secondary hover:text-accent-alt transition-colors rounded-full hover:bg-white/5"
+                            title="Start Adaptive Rest"
+                          >
+                            <Clock size={14} />
+                          </button>
+                        </div>
                       </>
                     )}
 
@@ -358,6 +526,19 @@ export default function WorkoutLogger({ onSave, defaultUnit }: WorkoutLoggerProp
             <p className="text-text-secondary font-medium text-sm">Select a module to start building your session</p>
           </div>
         )}
+
+        {exercises.length > 0 && (
+          <div className="pt-8 border-t border-border flex justify-center">
+            <button 
+              onClick={handleSave}
+              className="group relative flex items-center justify-center gap-4 bg-accent text-bg px-12 py-5 rounded-full font-black text-sm uppercase tracking-[0.2em] hover:bg-sky-300 transition-all shadow-2xl shadow-accent/20 overflow-hidden"
+            >
+              <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
+              <Save size={20} className="relative z-10" />
+              <span className="relative z-10">Finish Workout</span>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -378,6 +559,26 @@ function Check({ size, className }: { size: number, className?: string }) {
       className={className}
     >
       <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
+function CloudCheck({ size, className }: { size: number, className?: string }) {
+  return (
+    <svg 
+      xmlns="http://www.w3.org/2000/svg" 
+      width={size} 
+      height={size} 
+      viewBox="0 0 24 24" 
+      fill="none" 
+      stroke="currentColor" 
+      strokeWidth="2" 
+      strokeLinecap="round" 
+      strokeLinejoin="round" 
+      className={className}
+    >
+      <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" />
+      <path d="m9 16 2 2 4-4" />
     </svg>
   );
 }
@@ -409,5 +610,34 @@ function SetInput({ label, value, onChange, suffix }: { label: string, value: nu
       </div>
     </div>
   );
+}
+
+function HMSInput({ value, onChange, label, max }: { value: number, onChange: (v: number) => void, label: string, max?: number }) {
+  return (
+    <div className="flex flex-col items-center">
+      <input 
+        type="number" 
+        value={value === 0 ? '0' : value} 
+        onChange={(e) => {
+          let v = parseInt(e.target.value) || 0;
+          if (max !== undefined) v = Math.min(max, v);
+          onChange(v);
+        }}
+        className="bg-bg border border-border rounded-md px-1 py-1 w-12 text-center text-xs font-mono font-bold focus:ring-1 focus:ring-accent outline-none transition-all"
+      />
+      <span className="text-[8px] font-bold text-text-secondary mt-0.5">{label}</span>
+    </div>
+  );
+}
+
+function secondsToHMS(totalSeconds: number) {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return { hours, minutes, seconds };
+}
+
+function hmsToSeconds(h: number, m: number, s: number) {
+  return (h * 3600) + (m * 60) + s;
 }
 

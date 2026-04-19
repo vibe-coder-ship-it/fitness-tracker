@@ -108,5 +108,9 @@ service cloud.firestore {
       allow update: if isAuthenticated() && isDocOwner() && isValidNutrition(request.resource.data);
       allow delete: if isAuthenticated() && isDocOwner();
     }
+
+    match /drafts/{userId} {
+      allow read, write: if isOwner(userId);
+    }
   }
 }

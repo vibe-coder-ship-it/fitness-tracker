@@ -39,6 +39,7 @@ export interface WorkoutExercise {
   name: string;
   category: ExerciseCategory;
   sets: SetData[];
+  isCustom?: boolean;
 }
 
 export interface Workout {
