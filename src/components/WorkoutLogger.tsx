@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, Save, X, Dumbbell, Timer, Heart, Zap, ChevronDown, Ghost, Play, RotateCcw, Loader2, Clock } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Plus, Trash2, Save, X, Dumbbell, Timer, Heart, Zap, ChevronDown, Ghost, Play, RotateCcw, Loader2, Clock, Sparkles } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { 
   Workout, 
@@ -16,6 +16,7 @@ import { COMMON_EXERCISES } from '../constants';
 import { collection, doc, setDoc, getDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { User } from 'firebase/auth';
+import { GoogleGenAI, Type } from "@google/genai";
 
 interface WorkoutLoggerProps {
   onSave: (workout: Workout) => void;
@@ -33,7 +34,42 @@ export default function WorkoutLogger({ onSave, defaultUnit, user }: WorkoutLogg
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [checkedSets, setCheckedSets] = useState<Record<string, boolean>>({});
-  const startTime = useRef<number>(Date.now());
+  const [isAnalyzingMuscle, setIsAnalyzingMuscle] = useState<Record<string, boolean>>({});
+
+  const ai = useMemo(() => new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! }), []);
+
+  const detectMuscles = async (exercise: WorkoutExercise) => {
+    if (!exercise.name) return;
+    setIsAnalyzingMuscle(prev => ({ ...prev, [exercise.id]: true }));
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `Identify the primary and secondary muscle groups worked by this exercise: "${exercise.name}". Return a list of muscle names only.`,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              muscles: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING }
+              }
+            },
+            required: ["muscles"]
+          }
+        }
+      });
+
+      const result = JSON.parse(response.text || '{}');
+      if (result.muscles) {
+        updateExercise(exercise.id, { musclesWorked: result.muscles });
+      }
+    } catch (error) {
+      console.error("AI Muscle Analysis Error:", error);
+    } finally {
+      setIsAnalyzingMuscle(prev => ({ ...prev, [exercise.id]: false }));
+    }
+  };
 
   // Load Draft
   useEffect(() => {
@@ -46,7 +82,6 @@ export default function WorkoutLogger({ onSave, defaultUnit, user }: WorkoutLogg
             setExercises(draft.exercises);
             setNotes(draft.notes);
             setUnit(draft.unit);
-            if (draft.startTime) startTime.current = draft.startTime;
           } catch (e) {}
         }
         return;
@@ -61,7 +96,6 @@ export default function WorkoutLogger({ onSave, defaultUnit, user }: WorkoutLogg
           setNotes(draft.notes || '');
           setUnit(draft.unit || defaultUnit);
           setCheckedSets(draft.checkedSets || {});
-          if (draft.startTime) startTime.current = draft.startTime;
           setLastSaved(new Date());
         }
       } catch (error) {
@@ -78,7 +112,6 @@ export default function WorkoutLogger({ onSave, defaultUnit, user }: WorkoutLogg
       notes,
       unit,
       checkedSets,
-      startTime: startTime.current,
       updatedAt: serverTimestamp()
     };
 
@@ -194,14 +227,9 @@ export default function WorkoutLogger({ onSave, defaultUnit, user }: WorkoutLogg
   const handleSave = async () => {
     if (exercises.length === 0) return;
     
-    // Calculate duration automatically
-    const endTime = Date.now();
-    const durationMinutes = Math.round((endTime - startTime.current) / 60000);
-
     const workout: Workout = {
       id: Math.random().toString(36).substr(2, 9),
       date: new Date().toISOString(),
-      duration: durationMinutes,
       exercises,
       unit,
       notes
@@ -360,14 +388,31 @@ export default function WorkoutLogger({ onSave, defaultUnit, user }: WorkoutLogg
                 </div>
 
                 {exercise.isCustom && (
-                  <input 
-                    type="text" 
-                    placeholder="Enter exercise name"
-                    value={exercise.name}
-                    onChange={(e) => updateExercise(exercise.id, { name: e.target.value })}
-                    className="bg-transparent text-sm font-bold outline-none border-b border-accent transition-all w-full max-w-xs"
-                    autoFocus
-                  />
+                  <div className="flex flex-col gap-2 flex-grow max-w-xs">
+                    <input 
+                      type="text" 
+                      placeholder="Enter exercise name"
+                      value={exercise.name}
+                      onChange={(e) => updateExercise(exercise.id, { name: e.target.value })}
+                      className="bg-transparent text-sm font-bold outline-none border-b border-accent transition-all w-full"
+                      autoFocus
+                    />
+                    <div className="flex flex-wrap gap-1">
+                      {exercise.musclesWorked?.map(m => (
+                        <span key={m} className="px-1.5 py-0.5 bg-accent/10 text-accent text-[8px] font-bold uppercase rounded tracking-widest">
+                          {m}
+                        </span>
+                      ))}
+                      <button 
+                        onClick={() => detectMuscles(exercise)}
+                        disabled={isAnalyzingMuscle[exercise.id] || !exercise.name}
+                        className="text-[8px] font-bold uppercase text-text-secondary hover:text-accent flex items-center gap-1 transition-colors"
+                      >
+                        {isAnalyzingMuscle[exercise.id] ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
+                        {exercise.musclesWorked ? 'Update Muscles' : 'Detect Muscles'}
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
               <button 

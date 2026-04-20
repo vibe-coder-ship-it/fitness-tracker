@@ -26,7 +26,8 @@ import {
   User as UserIcon,
   Download,
   Calculator,
-  Map
+  Map,
+  X
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { 
@@ -82,6 +83,9 @@ export default function App() {
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
+  const ALLOWED_EMAIL = 'alangoonbs893@gmail.com';
+  const isAuthorized = useMemo(() => user?.email === ALLOWED_EMAIL, [user]);
+
   // Firestore Error Handler
   const handleFirestoreError = (error: unknown, operationType: string, path: string | null) => {
     const errInfo = {
@@ -125,7 +129,7 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setIsAuthReady(true);
-      if (currentUser) {
+      if (currentUser && currentUser.email === ALLOWED_EMAIL) {
         // Sync user profile
         setDoc(doc(db, 'users', currentUser.uid), {
           uid: currentUser.uid,
@@ -243,11 +247,10 @@ export default function App() {
   const exportToCSV = () => {
     if (workouts.length === 0) return;
 
-    const headers = ['Date', 'Duration', 'Exercise', 'Category', 'Sets'];
+    const headers = ['Date', 'Exercise', 'Category', 'Sets'];
     const rows = workouts.flatMap(w => 
       w.exercises.map(ex => [
         new Date(w.date).toLocaleDateString(),
-        w.duration,
         ex.name,
         ex.category,
         ex.sets.length
@@ -292,6 +295,74 @@ export default function App() {
       }, 0);
     }, 0);
   }, [workouts, unit]);
+
+  // Main Content Check
+  const renderContent = () => {
+    if (!isAuthReady) return null;
+    
+    if (!user) {
+      return (
+        <div className="flex flex-col items-center justify-center h-[60vh] text-center space-y-6">
+          <div className="bg-surface p-12 rounded-2xl border border-border kinetic-card max-w-md w-full">
+            <div className="bg-accent/10 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 text-accent">
+              <Dumbbell size={40} />
+            </div>
+            <h1 className="text-2xl font-black mb-3 italic tracking-tight uppercase">System Restricted</h1>
+            <p className="text-text-secondary text-sm mb-8 leading-relaxed">
+              Kinetic Architecture is a private performance environment. Authentication required for access.
+            </p>
+            <button 
+              onClick={handleLogin}
+              className="w-full flex items-center justify-center gap-2 bg-accent text-bg px-6 py-4 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-sky-300 transition-all shadow-xl shadow-accent/20"
+            >
+              <LogIn size={20} />
+              Begin Protocol
+            </button>
+            {authError && (
+              <p className="mt-4 text-[10px] text-red-400 font-bold uppercase tracking-widest animate-pulse">
+                {authError}
+              </p>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    if (!isAuthorized) {
+      return (
+        <div className="flex flex-col items-center justify-center h-[60vh] text-center space-y-6">
+          <div className="bg-red-500/10 p-12 rounded-2xl border border-red-500/20 kinetic-card max-w-md w-full">
+            <div className="bg-red-500/20 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 text-red-400">
+              <X size={40} />
+            </div>
+            <h1 className="text-2xl font-black mb-3 italic tracking-tight uppercase text-red-400">Unauthorized Access</h1>
+            <p className="text-text-secondary text-sm mb-8 leading-relaxed">
+              This environment is strictly locked to specific administrative credentials. Access denied for <strong>{user.email}</strong>.
+            </p>
+            <button 
+              onClick={handleLogout}
+              className="w-full bg-surface border border-border text-text-secondary px-6 py-4 rounded-xl font-bold text-xs uppercase tracking-widest hover:border-red-400 hover:text-red-400 transition-all"
+            >
+              Terminate Session
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+        {activeTab === 'dashboard' && <Dashboard workouts={workouts} unit={unit} />}
+        {activeTab === 'logger' && <WorkoutLogger onSave={addWorkout} defaultUnit={unit} user={user} />}
+        {activeTab === 'history' && <WorkoutHistory workouts={workouts} onDelete={deleteWorkout} unit={unit} />}
+        {activeTab === 'nutrition' && <NutritionTracker user={user} />}
+        {activeTab === 'plans' && <WorkoutPlans />}
+        {activeTab === 'ai' && <AITools />}
+        {activeTab === 'plates' && <PlateCalculator unit={unit} />}
+        {activeTab === 'recovery' && <MuscleRecoveryMap workouts={workouts} />}
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-bg text-text-primary font-sans flex flex-col">
@@ -424,7 +495,7 @@ export default function App() {
               {workouts.slice(0, 4).map(w => (
                 <div key={w.id} className="flex justify-between text-xs border-b border-border pb-2 last:border-0">
                   <span className="text-text-secondary truncate pr-2">{new Date(w.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
-                  <span className="kinetic-accent-text">{w.duration}m</span>
+                  <span className="kinetic-accent-text">{w.exercises.length} Exercises</span>
                 </div>
               ))}
               {workouts.length === 0 && <div className="text-xs text-text-secondary italic">No sessions yet</div>}
@@ -435,16 +506,7 @@ export default function App() {
         {/* Main Content */}
         <main className="flex-1 overflow-y-auto p-6 md:p-8">
           <div className="max-w-6xl mx-auto">
-            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              {activeTab === 'dashboard' && <Dashboard workouts={workouts} unit={unit} />}
-              {activeTab === 'logger' && <WorkoutLogger onSave={addWorkout} defaultUnit={unit} user={user} />}
-              {activeTab === 'history' && <WorkoutHistory workouts={workouts} onDelete={deleteWorkout} unit={unit} />}
-              {activeTab === 'nutrition' && <NutritionTracker user={user} />}
-              {activeTab === 'plans' && <WorkoutPlans />}
-              {activeTab === 'ai' && <AITools />}
-              {activeTab === 'plates' && <PlateCalculator unit={unit} />}
-              {activeTab === 'recovery' && <MuscleRecoveryMap workouts={workouts} />}
-            </div>
+            {renderContent()}
           </div>
         </main>
       </div>

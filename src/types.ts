@@ -40,12 +40,12 @@ export interface WorkoutExercise {
   category: ExerciseCategory;
   sets: SetData[];
   isCustom?: boolean;
+  musclesWorked?: string[];
 }
 
 export interface Workout {
   id: string;
   date: string; // ISO string
-  duration: number; // in minutes
   exercises: WorkoutExercise[];
   unit: WeightUnit;
   notes?: string;
@@ -59,6 +59,7 @@ export interface Meal {
   carbs: number;
   fat: number;
   timestamp: string;
+  imageUrl?: string;
 }
 
 export interface NutritionLog {

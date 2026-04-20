@@ -80,7 +80,6 @@ export default function Dashboard({ workouts, unit }: DashboardProps) {
   // Process data for the dashboard
   const stats = useMemo(() => {
     const totalWorkouts = workouts.length;
-    const totalDuration = workouts.reduce((acc, w) => acc + w.duration, 0);
     const totalExercises = workouts.reduce((acc, w) => acc + w.exercises.length, 0);
     
     // Extract unique exercises and their history
@@ -147,7 +146,6 @@ export default function Dashboard({ workouts, unit }: DashboardProps) {
 
     return {
       totalWorkouts,
-      totalDuration,
       totalExercises,
       exerciseHistory: Object.values(exerciseHistory)
     };
@@ -236,10 +234,9 @@ export default function Dashboard({ workouts, unit }: DashboardProps) {
   return (
     <div className="space-y-8">
       {/* Stats Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatCard icon={<Trophy size={18} className="text-accent" />} label="Workouts" value={stats.totalWorkouts} />
-        <StatCard icon={<Clock size={18} className="text-accent-alt" />} label="Minutes" value={stats.totalDuration} />
-        <StatCard icon={<Award size={18} className="text-orange-400" />} label="Exercises" value={stats.totalExercises} />
+        <StatCard icon={<Award size={18} className="text-orange-400" />} label="Exercises Logged" value={stats.totalExercises} />
         <StatCard icon={<Target size={18} className="text-red-400" />} label="Avg/Session" value={(stats.totalExercises / (stats.totalWorkouts || 1)).toFixed(1)} />
       </div>
 

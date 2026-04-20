@@ -57,7 +57,6 @@ export default function WorkoutHistory({ workouts, onDelete, unit }: WorkoutHist
                           {new Date(workout.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} Session
                         </h3>
                         <div className="flex items-center gap-3 text-text-secondary text-xs font-medium">
-                          <span className="flex items-center gap-1"><Clock size={12} /> {workout.duration}m</span>
                           <span className="flex items-center gap-1"><Dumbbell size={12} /> {workout.exercises.length} ex</span>
                           <span className="bg-white/5 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-tighter">{workout.unit}</span>
                         </div>

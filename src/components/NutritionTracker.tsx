@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Trash2, Utensils, PieChart, TrendingUp, Calendar } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Plus, Trash2, Utensils, PieChart, TrendingUp, Calendar, Camera, Upload, Loader2, Sparkles, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Meal, NutritionLog } from '../types';
 import { User } from 'firebase/auth';
 import { db, auth } from '../firebase';
+import { GoogleGenAI, Type } from "@google/genai";
 import { 
   collection, 
   query, 
@@ -24,6 +25,9 @@ interface NutritionTrackerProps {
 export default function NutritionTracker({ user }: NutritionTrackerProps) {
   const [logs, setLogs] = useState<NutritionLog[]>([]);
   const [showAddMeal, setShowAddMeal] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [newMeal, setNewMeal] = useState<Partial<Meal>>({
     name: '',
     calories: 0,
@@ -31,6 +35,71 @@ export default function NutritionTracker({ user }: NutritionTrackerProps) {
     carbs: 0,
     fat: 0
   });
+
+  const ai = useMemo(() => new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! }), []);
+
+  const analyzeFood = async (input: string | File) => {
+    setIsAnalyzing(true);
+    setAnalysisError(null);
+    try {
+      let contents: any;
+      if (typeof input === 'string') {
+        contents = `Analyze this food and provide nutritional facts (calories, protein, carbs, fat) and the food name: ${input}`;
+      } else {
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve((reader.result as string).split(',')[1]);
+          reader.readAsDataURL(input);
+        });
+        contents = {
+          parts: [
+            { text: "Analyze this food image and provide nutritional facts (calories, protein, carbs, fat) and the food name." },
+            { inlineData: { mimeType: input.type, data: base64 } }
+          ]
+        };
+      }
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              name: { type: Type.STRING },
+              calories: { type: Type.NUMBER },
+              protein: { type: Type.NUMBER },
+              carbs: { type: Type.NUMBER },
+              fat: { type: Type.NUMBER }
+            },
+            required: ["name", "calories", "protein", "carbs", "fat"]
+          }
+        }
+      });
+
+      const result = JSON.parse(response.text || '{}');
+      setNewMeal({
+        ...newMeal,
+        name: result.name,
+        calories: result.calories,
+        protein: result.protein,
+        carbs: result.carbs,
+        fat: result.fat
+      });
+      setShowAddMeal(true);
+    } catch (error) {
+      console.error("AI Analysis Error:", error);
+      setAnalysisError("Failed to analyze food. Please try manual entry.");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) analyzeFood(file);
+  };
 
   // Firestore Error Handler
   const handleFirestoreError = (error: unknown, operationType: string, path: string | null) => {
@@ -157,13 +226,37 @@ export default function NutritionTracker({ user }: NutritionTrackerProps) {
         <div className="lg:col-span-2 space-y-4">
           <div className="flex items-center justify-between px-2">
             <h3 className="kinetic-label">Today's Meals</h3>
-            <button 
-              onClick={() => setShowAddMeal(true)}
-              className="text-accent hover:text-sky-300 transition-colors flex items-center gap-1 text-xs font-bold uppercase tracking-widest"
-            >
-              <Plus size={14} /> Add Meal
-            </button>
+            <div className="flex gap-4">
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                accept="image/*" 
+                capture="environment" 
+                onChange={handleFileChange} 
+                className="hidden" 
+              />
+              <button 
+                onClick={() => fileInputRef.current?.click()}
+                className="text-accent hover:text-sky-300 transition-colors flex items-center gap-1 text-xs font-bold uppercase tracking-widest"
+                disabled={isAnalyzing}
+              >
+                {isAnalyzing ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
+                {isAnalyzing ? 'Analyzing...' : 'Photo Log'}
+              </button>
+              <button 
+                onClick={() => setShowAddMeal(true)}
+                className="text-accent hover:text-sky-300 transition-colors flex items-center gap-1 text-xs font-bold uppercase tracking-widest"
+              >
+                <Plus size={14} /> Add Meal
+              </button>
+            </div>
           </div>
+
+          {analysisError && (
+            <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] px-3 py-2 rounded-md animate-in fade-in zoom-in">
+              {analysisError}
+            </div>
+          )}
 
           <div className="space-y-3">
             {todayLog.meals.map(meal => (
@@ -199,15 +292,38 @@ export default function NutritionTracker({ user }: NutritionTrackerProps) {
         {/* Add Meal Form / Macro Balance */}
         <div className="space-y-6">
           {showAddMeal ? (
-            <div className="kinetic-card p-5 space-y-4 animate-in fade-in slide-in-from-right-4">
+            <div className="kinetic-card p-5 space-y-4 animate-in fade-in slide-in-from-right-4 relative">
               <div className="flex items-center justify-between">
-                <h3 className="kinetic-label">New Meal</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="kinetic-label text-accent flex items-center gap-1.5">
+                    <Sparkles size={14} />
+                    {newMeal.name ? 'Verify AI Log' : 'New Meal'}
+                  </h3>
+                </div>
                 <button onClick={() => setShowAddMeal(false)} className="text-text-secondary hover:text-text-primary">
-                  <Plus size={18} className="rotate-45" />
+                  <X size={18} />
                 </button>
               </div>
               <div className="space-y-3">
-                <Input label="Food Item" value={newMeal.name} onChange={v => setNewMeal({...newMeal, name: v})} placeholder="e.g. Chicken Breast" />
+                <div className="relative">
+                  <Input 
+                    label="Food Item" 
+                    value={newMeal.name} 
+                    onChange={v => setNewMeal({...newMeal, name: v})} 
+                    placeholder="e.g. Chicken Breast" 
+                  />
+                  {!newMeal.name && !isAnalyzing && (
+                    <button 
+                      onClick={() => {
+                        const food = prompt("Describe what you ate (e.g. '2 tacos and a coke'):");
+                        if (food) analyzeFood(food);
+                      }}
+                      className="absolute right-0 top-0 text-[10px] font-bold text-accent hover:text-sky-300 underline"
+                    >
+                      AI Describe
+                    </button>
+                  )}
+                </div>
                 <Input label="Calories" value={newMeal.calories} onChange={v => setNewMeal({...newMeal, calories: Number(v)})} type="number" />
                 <div className="grid grid-cols-3 gap-2">
                   <Input label="Protein" value={newMeal.protein} onChange={v => setNewMeal({...newMeal, protein: Number(v)})} type="number" suffix="g" />
